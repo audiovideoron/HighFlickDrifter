@@ -6,7 +6,7 @@ A command-line tool for finding brightness instability and power-induced visual 
 
 ## Overview
 
-HighFlickDrifter analyzes video files to identify subtle but disruptive brightness changes that occur during live events, recordings, and screen captures. These issues are often felt immediately by an audience but are difficult to locate after the fact.
+HighFlickDrifter analyzes video files to identify intermittent and disruptive brightness changes that occur during live events, recordings, and screen captures. These issues are often felt immediately by an audience but are difficult to locate after the fact.
 
 The tool scans video at a low sampling rate, applies rolling statistical analysis, and reports only the time ranges where the image *should have been still—but wasn’t*.
 
