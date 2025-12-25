@@ -232,7 +232,9 @@ def print_report(
     total_events: int,
     num_frames: int,
     duration_sec: float,
-    fps: int
+    fps: int,
+    brightness: list[float] | None = None,
+    banding: list[float] | None = None
 ):
     """Print detection report to console."""
 
@@ -248,6 +250,27 @@ def print_report(
 
     if not groups:
         print("No flicker events detected.")
+        print()
+        # Show diagnostic information to help user understand if detection worked
+        if brightness and banding:
+            b_mean = np.mean(brightness)
+            b_std = np.std(brightness)
+            g_mean = np.mean(banding)
+            g_std = np.std(banding)
+
+            print("Diagnostic Information:")
+            print(f"  Brightness: mean={b_mean:.1f}, std={b_std:.2f} (range: 0-255)")
+            print(f"  Banding variance: mean={g_mean:.1f}, std={g_std:.2f}")
+            print(f"  All {num_frames} frames analyzed successfully with metrics within normal range")
+            print()
+            print("This suggests the video is clean (no flicker detected).")
+            print("If you expected to find flicker, try:")
+            print("  - Lowering --threshold (current: 3.0, try 2.0 or 1.5)")
+            print("  - Increasing --fps for more granular sampling")
+        else:
+            print()
+            print("WARNING: Unable to provide diagnostic information.")
+            print("This may indicate detection failed or no frames were analyzed successfully.")
         return
 
     print("-" * 60)
@@ -535,7 +558,7 @@ def main():
 
         # Step 6: Report
         duration_sec = timestamps[-1] if timestamps else 0
-        print_report(groups, len(events), len(brightness), duration_sec, args.fps)
+        print_report(groups, len(events), len(brightness), duration_sec, args.fps, brightness, banding)
 
         # Step 7: Interactive review (if requested)
         if args.review:
