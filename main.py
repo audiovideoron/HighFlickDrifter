@@ -144,13 +144,13 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
             shutil.rmtree(temp_dir)
 
 
-def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float], list[float], list[float], int]:
-    """Analyze extracted frames for brightness and banding metrics.
+def analyze_frames_generator(frame_dir: Path, pts_times: list[float]):
+    """Generator that yields frame analysis results one at a time.
 
-    Returns:
-        Tuple of (brightness, banding, timestamps, corrupt_count)
+    Yields:
+        Tuple of (brightness, banding, timestamp) for each valid frame,
+        or None for corrupt frames.
     """
-
     frames = sorted(frame_dir.glob("frame_*.jpg"))
     n = min(len(frames), len(pts_times))
 
@@ -158,15 +158,10 @@ def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float]
     if abs(len(frames) - len(pts_times)) > 1:
         print(f"Warning: Frame/timestamp count mismatch - {len(frames)} frames vs {len(pts_times)} timestamps")
 
-    brightness = []
-    banding = []
-    timestamps = []
-    corrupt_count = 0
-
     for i in range(n):
         img = cv2.imread(str(frames[i]), cv2.IMREAD_GRAYSCALE)
         if img is None:
-            corrupt_count += 1
+            yield None  # Signal corrupt frame
             continue
 
         # Mean brightness (0-255)
@@ -176,9 +171,28 @@ def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float]
         row_means = img.mean(axis=1)
         band = float(np.var(row_means))
 
-        brightness.append(mean_b)
-        banding.append(band)
-        timestamps.append(pts_times[i])
+        yield (mean_b, band, pts_times[i])
+
+
+def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float], list[float], list[float], int]:
+    """Analyze extracted frames for brightness and banding metrics.
+
+    Returns:
+        Tuple of (brightness, banding, timestamps, corrupt_count)
+    """
+    brightness = []
+    banding = []
+    timestamps = []
+    corrupt_count = 0
+
+    for result in analyze_frames_generator(frame_dir, pts_times):
+        if result is None:
+            corrupt_count += 1
+        else:
+            mean_b, band, timestamp = result
+            brightness.append(mean_b)
+            banding.append(band)
+            timestamps.append(timestamp)
 
     return brightness, banding, timestamps, corrupt_count
 
