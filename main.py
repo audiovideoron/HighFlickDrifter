@@ -260,6 +260,12 @@ def main():
         print(f"Error: Video file not found: {video_path}")
         sys.exit(1)
 
+    # Check for ffmpeg availability
+    if not shutil.which("ffmpeg"):
+        print("Error: ffmpeg not found in PATH")
+        print("Please install ffmpeg: https://ffmpeg.org/download.html")
+        sys.exit(1)
+
     # Temporary directory for extracted frames
     frame_dir = Path(__file__).parent / "frames_tmp"
 
