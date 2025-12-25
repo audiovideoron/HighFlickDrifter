@@ -82,6 +82,10 @@ def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float]
     frames = sorted(frame_dir.glob("frame_*.jpg"))
     n = min(len(frames), len(pts_times))
 
+    # Warn if frame/timestamp counts don't match (tolerance: 1 frame)
+    if abs(len(frames) - len(pts_times)) > 1:
+        print(f"Warning: Frame/timestamp count mismatch - {len(frames)} frames vs {len(pts_times)} timestamps")
+
     brightness = []
     banding = []
     timestamps = []
