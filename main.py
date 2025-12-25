@@ -82,7 +82,7 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
         f.unlink()
 
     cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-stats",
         "-i", str(video_path),
         "-vf", f"fps={fps}",
         "-vsync", "vfr",
@@ -90,7 +90,40 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
     ]
 
     try:
-        subprocess.run(cmd, check=True, timeout=600)
+        # Run ffmpeg with real-time progress output
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+
+        # Monitor progress by periodically checking frame count
+        start_time = time.time()
+        last_update = 0
+
+        while process.poll() is None:
+            time.sleep(0.5)
+            current_count = len(list(temp_dir.glob("frame_*.jpg")))
+
+            # Update progress every second
+            if time.time() - last_update >= 1.0:
+                elapsed = time.time() - start_time
+                print(f"\rExtracting frames... {current_count} frames extracted ({elapsed:.0f}s elapsed)", end="", flush=True)
+                last_update = time.time()
+
+        # Wait for process to finish and check return code
+        process.wait(timeout=600)
+
+        if process.returncode != 0:
+            print()  # New line after progress
+            raise subprocess.CalledProcessError(process.returncode, cmd)
+
+        # Final count
+        final_count = len(list(temp_dir.glob("frame_*.jpg")))
+        elapsed = time.time() - start_time
+        print(f"\rExtracting frames... {final_count} frames extracted ({elapsed:.0f}s elapsed)")
 
         # Extraction succeeded - now replace old frames with new ones
         for f in output_dir.glob("frame_*.jpg"):
@@ -101,6 +134,7 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
 
         return len(list(output_dir.glob("frame_*.jpg")))
     except subprocess.TimeoutExpired:
+        print()  # New line after progress
         print("Error: ffmpeg frame extraction timed out after 600 seconds")
         print("This may indicate a very large video file or ffmpeg hang")
         sys.exit(1)
@@ -498,9 +532,7 @@ def main():
             sys.exit(1)
 
         # Step 2: Extract frames
-        print("Extracting frames...")
         num_frames = extract_frames(video_path, frame_dir, args.fps)
-        print(f"Extracted {num_frames} frames")
 
         if num_frames == 0:
             print("Error: No frames extracted. Check video file and ffmpeg installation.")
