@@ -282,6 +282,10 @@ def main():
         num_frames = extract_frames(video_path, frame_dir, args.fps)
         print(f"Extracted {num_frames} frames")
 
+        if num_frames == 0:
+            print("Error: No frames extracted. Check video file and ffmpeg installation.")
+            sys.exit(1)
+
         # Step 3: Analyze frames
         print("Analyzing brightness...")
         brightness, banding, timestamps = analyze_frames(frame_dir, pts_times)
