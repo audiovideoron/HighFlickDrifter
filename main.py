@@ -408,9 +408,13 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
 
             input("  Press Enter to play...")
 
-            # Play for ~7 seconds then ensure paused
+            # Calculate playback duration based on segment length (add 4s buffer)
+            t_end = group[-1]["t_sec"]
+            playback_duration = (t_end - t_start) + 4
+
+            # Play through segment then ensure paused
             vlc_ensure_playing()
-            time.sleep(7)
+            time.sleep(playback_duration)
             vlc_ensure_paused()
 
             if i < len(groups):
