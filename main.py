@@ -339,13 +339,33 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
     print("\nLaunching VLC...")
     vlc_process = launch_vlc(video_path)
 
-    # Wait for VLC HTTP interface to become ready
-    for _ in range(30):
+    # Wait for VLC HTTP interface to become ready with improved error handling
+    max_retries = 30
+    retry_interval = 0.5
+    for attempt in range(max_retries):
+        # Check if VLC process is still alive
+        if vlc_process.poll() is not None:
+            # Process has died
+            print("Error: VLC process terminated unexpectedly.")
+            print("This usually means:")
+            print("  - VLC failed to start (check if VLC is properly installed)")
+            print("  - The video file format is not supported")
+            print("  - VLC encountered a startup error")
+            return
+
+        # Check if HTTP interface is ready
         if vlc_is_ready():
             break
-        time.sleep(0.5)
+        time.sleep(retry_interval)
     else:
-        print("Error: VLC HTTP interface not responding. Is VLC installed?")
+        # Timeout reached
+        elapsed_time = max_retries * retry_interval
+        print(f"Error: VLC HTTP interface not responding after {elapsed_time:.1f} seconds.")
+        print("VLC process is still running but the HTTP interface is not available.")
+        print("This may indicate:")
+        print("  - VLC is starting very slowly")
+        print("  - HTTP interface is disabled in VLC preferences")
+        print(f"  - Port {VLC_HTTP_PORT} is already in use")
         vlc_process.terminate()
         return
 
