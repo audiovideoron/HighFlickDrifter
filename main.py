@@ -76,8 +76,12 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
     return len(list(output_dir.glob("frame_*.jpg")))
 
 
-def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float], list[float], list[float]]:
-    """Analyze extracted frames for brightness and banding metrics."""
+def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float], list[float], list[float], int]:
+    """Analyze extracted frames for brightness and banding metrics.
+
+    Returns:
+        Tuple of (brightness, banding, timestamps, corrupt_count)
+    """
 
     frames = sorted(frame_dir.glob("frame_*.jpg"))
     n = min(len(frames), len(pts_times))
@@ -85,10 +89,12 @@ def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float]
     brightness = []
     banding = []
     timestamps = []
+    corrupt_count = 0
 
     for i in range(n):
         img = cv2.imread(str(frames[i]), cv2.IMREAD_GRAYSCALE)
         if img is None:
+            corrupt_count += 1
             continue
 
         # Mean brightness (0-255)
@@ -102,7 +108,7 @@ def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float]
         banding.append(band)
         timestamps.append(pts_times[i])
 
-    return brightness, banding, timestamps
+    return brightness, banding, timestamps, corrupt_count
 
 
 def detect_anomalies(
@@ -284,7 +290,15 @@ def main():
 
         # Step 3: Analyze frames
         print("Analyzing brightness...")
-        brightness, banding, timestamps = analyze_frames(frame_dir, pts_times)
+        brightness, banding, timestamps, corrupt_count = analyze_frames(frame_dir, pts_times)
+
+        # Warn if frames failed to load
+        if corrupt_count > 0:
+            corrupt_pct = (corrupt_count / num_frames) * 100
+            print(f"WARNING: {corrupt_count} frames ({corrupt_pct:.1f}%) failed to load (corrupt or unreadable)")
+            if corrupt_pct > 5.0:
+                print(f"ERROR: More than 5% of frames are corrupt - results may be unreliable")
+                sys.exit(1)
 
         if not brightness:
             print("Error: No frames could be analyzed")
