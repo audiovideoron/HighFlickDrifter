@@ -43,10 +43,16 @@ def extract_frame_timestamps(video_path: Path, fps: int) -> list[float]:
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=True)
     except subprocess.TimeoutExpired:
         print("Error: ffmpeg timestamp extraction timed out after 300 seconds")
         print("This may indicate a very large video file or ffmpeg hang")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print("Error: ffmpeg timestamp extraction failed")
+        print(f"ffmpeg returned non-zero exit code: {e.returncode}")
+        if e.stderr:
+            print(f"Error output: {e.stderr}")
         sys.exit(1)
 
     lines = result.stderr.splitlines()
