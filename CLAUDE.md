@@ -12,6 +12,9 @@ uv sync
 python main.py <video_file>
 python main.py video.mp4 --fps 4 --threshold 2.5 --keep-frames
 
+# Run detection with interactive VLC review
+python main.py video.mp4 --review
+
 # Generate test footage and validate detection
 python generate_test.py
 python main.py test_footage/test_flicker.mp4
@@ -20,7 +23,8 @@ python main.py test_footage/test_flicker.mp4
 ## Dependencies
 
 - **ffmpeg** must be available in PATH (used for frame extraction)
-- Python packages managed via uv: numpy, opencv-python
+- **VLC** must be available in PATH (used for --review mode)
+- Python packages managed via uv: numpy, opencv-python, requests
 
 ## Architecture
 
@@ -31,6 +35,7 @@ Single-file CLI tool (`main.py`) with a linear processing pipeline:
 3. **Anomaly Detection** - Rolling z-score flags frames deviating from baseline
 4. **Event Grouping** - Nearby anomalies (within 15s) collapse into reviewable segments
 5. **Reporting** - Outputs timestamped segments for manual review
+6. **Interactive Review** (optional) - VLC steps through anomalies via HTTP API
 
 Key configuration constants at top of `main.py`:
 - `FPS_SAMPLE` (2) - sample rate
@@ -41,3 +46,7 @@ Key configuration constants at top of `main.py`:
 ## Test Footage
 
 `generate_test.py` creates synthetic video with known anomalies at specific timestamps (15-17s, 35-37s, 50-52s) to validate detection accuracy.
+
+## Issue Tracking
+
+BEFORE ANYTHING ELSE: run `bd onboard` and follow the instructions.
