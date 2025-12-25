@@ -448,7 +448,7 @@ def vlc_is_position_stable(check_interval: float = 0.15) -> bool:
     return time1 == time2
 
 
-def vlc_ensure_paused() -> bool:
+def vlc_ensure_paused(verbose: bool = False) -> bool:
     """Ensure VLC is paused using position verification.
 
     The VLC pl_pause command is a toggle that can be unreliable.
@@ -457,12 +457,22 @@ def vlc_ensure_paused() -> bool:
     the state field alone.
     """
     for attempt in range(15):  # Up to ~3 seconds total
-        # First check: is position already stable?
-        if vlc_is_position_stable():
+        # Check position stability
+        t1 = vlc_get_time()
+        time.sleep(0.15)
+        t2 = vlc_get_time()
+        state = vlc_get_state()
+
+        if verbose:
+            print(f"    [pause check {attempt}] state={state}, t1={t1}, t2={t2}, stable={t1==t2}")
+
+        if t1 is not None and t2 is not None and t1 == t2:
             return True
 
-        # Position is moving - send pause command
-        vlc_command("pl_pause")
+        # Position is moving - only send pause if state says playing
+        # (avoid toggling if state is already paused but position briefly changed)
+        if state == "playing":
+            vlc_command("pl_pause")
         time.sleep(0.1)
 
     return False  # Failed to pause
@@ -539,8 +549,12 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
             # Seek to offset seconds before anomaly, ensure paused
             print(f"Segment {i}/{len(groups)}: {format_timestamp(t_start)}")
             vlc_seek(seek_to)
-            time.sleep(0.3)  # Wait for seek to complete before checking pause
-            if not vlc_ensure_paused():
+            time.sleep(0.2)
+            # Only send pause if actually playing (pl_pause is a toggle!)
+            if vlc_get_state() == "playing":
+                vlc_command("pl_pause")
+                time.sleep(0.2)
+            if not vlc_ensure_paused(verbose=False):
                 print("  Warning: Could not confirm paused state")
 
             response = input("  Press Enter to play, 's' to skip, 'q' to quit: ").strip().lower()
