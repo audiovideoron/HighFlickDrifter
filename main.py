@@ -384,19 +384,36 @@ def launch_vlc(video_path: Path) -> subprocess.Popen:
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def vlc_get_state() -> str | None:
-    """Get VLC playback state (playing, paused, stopped)."""
+def vlc_get_status() -> dict | None:
+    """Get VLC status including state and time."""
     try:
         url = f"http://localhost:{VLC_HTTP_PORT}/requests/status.xml"
         auth = ("", VLC_HTTP_PASSWORD)
         response = requests.get(url, auth=auth, timeout=VLC_HTTP_TIMEOUT)
         if response.status_code == 200:
-            match = re.search(r"<state>(\w+)</state>", response.text)
-            if match:
-                return match.group(1)
+            status = {}
+            state_match = re.search(r"<state>(\w+)</state>", response.text)
+            if state_match:
+                status["state"] = state_match.group(1)
+            time_match = re.search(r"<time>(\d+)</time>", response.text)
+            if time_match:
+                status["time"] = int(time_match.group(1))
+            return status if status else None
         return None
     except requests.RequestException:
         return None
+
+
+def vlc_get_state() -> str | None:
+    """Get VLC playback state (playing, paused, stopped)."""
+    status = vlc_get_status()
+    return status.get("state") if status else None
+
+
+def vlc_get_time() -> int | None:
+    """Get current playback time in seconds."""
+    status = vlc_get_status()
+    return status.get("time") if status else None
 
 
 def vlc_command(command: str, val: str | None = None) -> bool:
@@ -418,27 +435,54 @@ def vlc_seek(seconds: float) -> bool:
     return vlc_command("seek", str(int(seconds)))
 
 
+def vlc_is_position_stable(check_interval: float = 0.15) -> bool:
+    """Check if playback position is stable (video not moving)."""
+    time1 = vlc_get_time()
+    if time1 is None:
+        return False
+    time.sleep(check_interval)
+    time2 = vlc_get_time()
+    if time2 is None:
+        return False
+    # Position is stable if time hasn't changed
+    return time1 == time2
+
+
 def vlc_ensure_paused() -> bool:
-    """Ensure VLC is paused, waiting for confirmation."""
-    for _ in range(10):  # Try up to 10 times
-        state = vlc_get_state()
-        if state == "paused":
+    """Ensure VLC is paused using position verification.
+
+    The VLC pl_pause command is a toggle that can be unreliable.
+    This function verifies pause by checking that the playhead
+    position is not moving, which is more reliable than trusting
+    the state field alone.
+    """
+    for attempt in range(15):  # Up to ~3 seconds total
+        # First check: is position already stable?
+        if vlc_is_position_stable():
             return True
-        if state == "playing":
-            vlc_command("pl_pause")
-        time.sleep(0.1)  # Brief wait for state to change
+
+        # Position is moving - send pause command
+        vlc_command("pl_pause")
+        time.sleep(0.1)
+
     return False  # Failed to pause
 
 
 def vlc_ensure_playing() -> bool:
-    """Ensure VLC is playing, waiting for confirmation."""
-    for _ in range(10):  # Try up to 10 times
-        state = vlc_get_state()
-        if state == "playing":
+    """Ensure VLC is playing by verifying position is changing."""
+    for attempt in range(15):  # Up to ~3 seconds total
+        time1 = vlc_get_time()
+        time.sleep(0.15)
+        time2 = vlc_get_time()
+
+        # If time is advancing, we're playing
+        if time1 is not None and time2 is not None and time2 > time1:
             return True
-        if state == "paused":
-            vlc_command("pl_pause")
-        time.sleep(0.1)  # Brief wait for state to change
+
+        # Not playing - send play command (pl_pause toggles)
+        vlc_command("pl_pause")
+        time.sleep(0.1)
+
     return False  # Failed to start playing
 
 
@@ -495,7 +539,9 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
             # Seek to offset seconds before anomaly, ensure paused
             print(f"Segment {i}/{len(groups)}: {format_timestamp(t_start)}")
             vlc_seek(seek_to)
-            vlc_ensure_paused()
+            time.sleep(0.3)  # Wait for seek to complete before checking pause
+            if not vlc_ensure_paused():
+                print("  Warning: Could not confirm paused state")
 
             response = input("  Press Enter to play, 's' to skip, 'q' to quit: ").strip().lower()
 
