@@ -419,19 +419,27 @@ def vlc_seek(seconds: float) -> bool:
 
 
 def vlc_ensure_paused() -> bool:
-    """Ensure VLC is paused (only toggle if currently playing)."""
-    state = vlc_get_state()
-    if state == "playing":
-        return vlc_command("pl_pause")
-    return state == "paused"
+    """Ensure VLC is paused, waiting for confirmation."""
+    for _ in range(10):  # Try up to 10 times
+        state = vlc_get_state()
+        if state == "paused":
+            return True
+        if state == "playing":
+            vlc_command("pl_pause")
+        time.sleep(0.1)  # Brief wait for state to change
+    return False  # Failed to pause
 
 
 def vlc_ensure_playing() -> bool:
-    """Ensure VLC is playing (only toggle if currently paused)."""
-    state = vlc_get_state()
-    if state == "paused":
-        return vlc_command("pl_pause")
-    return state == "playing"
+    """Ensure VLC is playing, waiting for confirmation."""
+    for _ in range(10):  # Try up to 10 times
+        state = vlc_get_state()
+        if state == "playing":
+            return True
+        if state == "paused":
+            vlc_command("pl_pause")
+        time.sleep(0.1)  # Brief wait for state to change
+    return False  # Failed to start playing
 
 
 def vlc_is_ready() -> bool:
