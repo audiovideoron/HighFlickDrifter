@@ -33,6 +33,18 @@ Z_THRESHOLD = 3.0       # Z-score threshold for anomaly detection (lower = more 
 WINDOW_SIZE = 30        # Rolling window size in samples (~15 seconds at 2 fps)
 GROUP_GAP_SEC = 15      # Group events within this many seconds
 
+# Timeout settings (seconds)
+FFMPEG_TIMESTAMP_TIMEOUT = 300  # ffmpeg timestamp extraction timeout
+FFMPEG_FRAME_TIMEOUT = 600      # ffmpeg frame extraction timeout
+VLC_HTTP_TIMEOUT = 5            # VLC HTTP API request timeout
+VLC_TERMINATE_TIMEOUT = 5       # VLC graceful termination timeout
+
+# VLC review settings
+VLC_RETRY_MAX = 30              # Max attempts to connect to VLC HTTP interface
+VLC_RETRY_INTERVAL = 0.5        # Seconds between VLC connection attempts
+VLC_SEEK_OFFSET = 2             # Seconds to seek before anomaly start
+VLC_PLAYBACK_DURATION = 7       # Seconds to play through each anomaly
+
 
 def extract_frame_timestamps(video_path: Path, fps: int) -> list[float]:
     """Extract PTS timestamps from video using ffmpeg showinfo filter."""
@@ -45,10 +57,10 @@ def extract_frame_timestamps(video_path: Path, fps: int) -> list[float]:
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMESTAMP_TIMEOUT, check=True)
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(
-            "ffmpeg timestamp extraction timed out after 300 seconds. "
+            f"ffmpeg timestamp extraction timed out after {FFMPEG_TIMESTAMP_TIMEOUT} seconds. "
             "This may indicate a very large video file or ffmpeg hang"
         ) from e
     except subprocess.CalledProcessError as e:
@@ -114,7 +126,7 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
                 last_update = time.time()
 
         # Wait for process to finish and check return code
-        process.wait(timeout=600)
+        process.wait(timeout=FFMPEG_FRAME_TIMEOUT)
 
         if process.returncode != 0:
             print()  # New line after progress
@@ -136,7 +148,7 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
     except subprocess.TimeoutExpired as e:
         print()  # New line after progress
         raise RuntimeError(
-            "ffmpeg frame extraction timed out after 600 seconds. "
+            f"ffmpeg frame extraction timed out after {FFMPEG_FRAME_TIMEOUT} seconds. "
             "This may indicate a very large video file or ffmpeg hang"
         ) from e
     finally:
@@ -377,7 +389,7 @@ def vlc_get_state() -> str | None:
     try:
         url = f"http://localhost:{VLC_HTTP_PORT}/requests/status.xml"
         auth = ("", VLC_HTTP_PASSWORD)
-        response = requests.get(url, auth=auth, timeout=5)
+        response = requests.get(url, auth=auth, timeout=VLC_HTTP_TIMEOUT)
         if response.status_code == 200:
             match = re.search(r"<state>(\w+)</state>", response.text)
             if match:
@@ -395,7 +407,7 @@ def vlc_command(command: str, val: str | None = None) -> bool:
         params = {"command": command}
         if val is not None:
             params["val"] = val
-        response = requests.get(url, params=params, auth=auth, timeout=5)
+        response = requests.get(url, params=params, auth=auth, timeout=VLC_HTTP_TIMEOUT)
         return response.status_code == 200
     except requests.RequestException:
         return False
@@ -437,9 +449,7 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
     vlc_process = launch_vlc(video_path)
 
     # Wait for VLC HTTP interface to become ready with improved error handling
-    max_retries = 30
-    retry_interval = 0.5
-    for attempt in range(max_retries):
+    for attempt in range(VLC_RETRY_MAX):
         # Check if VLC process is still alive
         if vlc_process.poll() is not None:
             # Process has died
@@ -453,10 +463,10 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
         # Check if HTTP interface is ready
         if vlc_is_ready():
             break
-        time.sleep(retry_interval)
+        time.sleep(VLC_RETRY_INTERVAL)
     else:
         # Timeout reached
-        elapsed_time = max_retries * retry_interval
+        elapsed_time = VLC_RETRY_MAX * VLC_RETRY_INTERVAL
         vlc_process.terminate()
         raise RuntimeError(
             f"VLC HTTP interface not responding after {elapsed_time:.1f} seconds. "
@@ -472,9 +482,9 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
     try:
         for i, group in enumerate(groups, 1):
             t_start = group[0]["t_sec"]
-            seek_to = max(0, t_start - 2)
+            seek_to = max(0, t_start - VLC_SEEK_OFFSET)
 
-            # Seek to 2 seconds before anomaly, ensure paused
+            # Seek to offset seconds before anomaly, ensure paused
             print(f"Segment {i}/{len(groups)}: {format_timestamp(t_start)}")
             vlc_seek(seek_to)
             vlc_ensure_paused()
@@ -509,7 +519,7 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
         # Gracefully terminate VLC with timeout and kill() fallback
         vlc_process.terminate()
         try:
-            vlc_process.wait(timeout=5)
+            vlc_process.wait(timeout=VLC_TERMINATE_TIMEOUT)
         except subprocess.TimeoutExpired:
             # Process didn't terminate gracefully, force kill
             vlc_process.kill()
