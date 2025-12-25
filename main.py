@@ -394,7 +394,7 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
         vlc_process.terminate()
         return
 
-    print(f"Reviewing {len(groups)} anomaly segments. Press Enter to play through each.\n")
+    print(f"Reviewing {len(groups)} anomaly segments.\n")
 
     try:
         for i, group in enumerate(groups, 1):
@@ -406,7 +406,14 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
             vlc_seek(seek_to)
             vlc_ensure_paused()
 
-            input("  Press Enter to play...")
+            response = input("  Press Enter to play, 's' to skip, 'q' to quit: ").strip().lower()
+
+            if response == 'q':
+                print("  Quitting review...")
+                break
+            elif response == 's':
+                print("  Skipping segment...")
+                continue
 
             # Play for ~7 seconds then ensure paused
             vlc_ensure_playing()
@@ -414,7 +421,10 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
             vlc_ensure_paused()
 
             if i < len(groups):
-                input("  Press Enter for next segment...")
+                response = input("  Press Enter for next segment, 'q' to quit: ").strip().lower()
+                if response == 'q':
+                    print("  Quitting review...")
+                    break
             else:
                 input("  Press Enter to finish...")
 
