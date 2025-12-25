@@ -73,8 +73,12 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Clean any existing frames
-    for f in output_dir.glob("frame_*.jpg"):
+    # Extract to temp directory first to preserve old frames on failure
+    temp_dir = output_dir / "new_frames_tmp"
+    temp_dir.mkdir(exist_ok=True)
+
+    # Clean temp directory
+    for f in temp_dir.glob("frame_*.jpg"):
         f.unlink()
 
     cmd = [
@@ -82,17 +86,28 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
         "-i", str(video_path),
         "-vf", f"fps={fps}",
         "-vsync", "vfr",
-        str(output_dir / "frame_%06d.jpg")
+        str(temp_dir / "frame_%06d.jpg")
     ]
 
     try:
         subprocess.run(cmd, check=True, timeout=600)
+
+        # Extraction succeeded - now replace old frames with new ones
+        for f in output_dir.glob("frame_*.jpg"):
+            f.unlink()
+
+        for f in temp_dir.glob("frame_*.jpg"):
+            f.rename(output_dir / f.name)
+
+        return len(list(output_dir.glob("frame_*.jpg")))
     except subprocess.TimeoutExpired:
         print("Error: ffmpeg frame extraction timed out after 600 seconds")
         print("This may indicate a very large video file or ffmpeg hang")
         sys.exit(1)
-
-    return len(list(output_dir.glob("frame_*.jpg")))
+    finally:
+        # Clean up temp directory
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
 
 
 def analyze_frames(frame_dir: Path, pts_times: list[float]) -> tuple[list[float], list[float], list[float], int]:
