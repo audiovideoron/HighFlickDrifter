@@ -18,11 +18,13 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections import deque
 from pathlib import Path
 
 import cv2
 import numpy as np
+import requests
 
 
 # Configuration
@@ -225,6 +227,162 @@ def print_report(
     print()
 
 
+VLC_HTTP_PORT = 8080
+VLC_HTTP_PASSWORD = "flicker"
+
+
+def find_vlc() -> str:
+    """Find VLC executable path."""
+    # Check PATH first
+    vlc_path = shutil.which("vlc")
+    if vlc_path:
+        return vlc_path
+    # macOS app bundle
+    macos_vlc = "/Applications/VLC.app/Contents/MacOS/VLC"
+    if Path(macos_vlc).exists():
+        return macos_vlc
+    raise FileNotFoundError("VLC not found. Install VLC and ensure it's in PATH or /Applications/")
+
+
+def launch_vlc(video_path: Path) -> subprocess.Popen:
+    """Launch VLC with HTTP interface enabled, starting paused."""
+    vlc_bin = find_vlc()
+    cmd = [
+        vlc_bin,
+        str(video_path),
+        "--extraintf", "http",
+        "--http-password", VLC_HTTP_PASSWORD,
+        "--http-port", str(VLC_HTTP_PORT),
+        "--start-paused",
+    ]
+    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def vlc_get_state() -> str | None:
+    """Get VLC playback state (playing, paused, stopped)."""
+    try:
+        url = f"http://localhost:{VLC_HTTP_PORT}/requests/status.xml"
+        auth = ("", VLC_HTTP_PASSWORD)
+        response = requests.get(url, auth=auth, timeout=5)
+        if response.status_code == 200:
+            match = re.search(r"<state>(\w+)</state>", response.text)
+            if match:
+                return match.group(1)
+        return None
+    except requests.RequestException:
+        return None
+
+
+def vlc_command(command: str, val: str | None = None) -> bool:
+    """Send a command to VLC via HTTP API."""
+    try:
+        url = f"http://localhost:{VLC_HTTP_PORT}/requests/status.xml"
+        auth = ("", VLC_HTTP_PASSWORD)
+        params = {"command": command}
+        if val is not None:
+            params["val"] = val
+        response = requests.get(url, params=params, auth=auth, timeout=5)
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def vlc_seek(seconds: float) -> bool:
+    """Seek VLC to specified position in seconds."""
+    return vlc_command("seek", str(int(seconds)))
+
+
+def vlc_ensure_paused() -> bool:
+    """Ensure VLC is paused (only toggle if currently playing)."""
+    state = vlc_get_state()
+    if state == "playing":
+        return vlc_command("pl_pause")
+    return state == "paused"
+
+
+def vlc_ensure_playing() -> bool:
+    """Ensure VLC is playing (only toggle if currently paused)."""
+    state = vlc_get_state()
+    if state == "paused":
+        return vlc_command("pl_pause")
+    return state == "playing"
+
+
+def vlc_is_ready() -> bool:
+    """Check if VLC HTTP interface is responding."""
+    return vlc_get_state() is not None
+
+
+def review_anomalies(video_path: Path, groups: list[list[dict]]):
+    """Launch VLC and step through detected anomalies."""
+    if not groups:
+        print("No anomalies to review.")
+        return
+
+    print("\nLaunching VLC...")
+    vlc_process = launch_vlc(video_path)
+
+    # Wait for VLC HTTP interface to become ready with improved error handling
+    max_retries = 30
+    retry_interval = 0.5
+    for attempt in range(max_retries):
+        # Check if VLC process is still alive
+        if vlc_process.poll() is not None:
+            # Process has died
+            print("Error: VLC process terminated unexpectedly.")
+            print("This usually means:")
+            print("  - VLC failed to start (check if VLC is properly installed)")
+            print("  - The video file format is not supported")
+            print("  - VLC encountered a startup error")
+            return
+
+        # Check if HTTP interface is ready
+        if vlc_is_ready():
+            break
+        time.sleep(retry_interval)
+    else:
+        # Timeout reached
+        elapsed_time = max_retries * retry_interval
+        print(f"Error: VLC HTTP interface not responding after {elapsed_time:.1f} seconds.")
+        print("VLC process is still running but the HTTP interface is not available.")
+        print("This may indicate:")
+        print("  - VLC is starting very slowly")
+        print("  - HTTP interface is disabled in VLC preferences")
+        print("  - Port {VLC_HTTP_PORT} is already in use")
+        vlc_process.terminate()
+        return
+
+    print(f"Reviewing {len(groups)} anomaly segments. Press Enter to play through each.\n")
+
+    try:
+        for i, group in enumerate(groups, 1):
+            t_start = group[0]["t_sec"]
+            seek_to = max(0, t_start - 2)
+
+            # Seek to 2 seconds before anomaly, ensure paused
+            print(f"Segment {i}/{len(groups)}: {format_timestamp(t_start)}")
+            vlc_seek(seek_to)
+            vlc_ensure_paused()
+
+            input("  Press Enter to play...")
+
+            # Play for ~7 seconds then ensure paused
+            vlc_ensure_playing()
+            time.sleep(7)
+            vlc_ensure_paused()
+
+            if i < len(groups):
+                input("  Press Enter for next segment...")
+            else:
+                input("  Press Enter to finish...")
+
+    finally:
+        vlc_process.terminate()
+        vlc_process.wait()
+
+    print("\nReview complete")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Detect flicker anomalies in video recordings"
@@ -250,6 +408,11 @@ def main():
         "--keep-frames",
         action="store_true",
         help="Keep extracted frames after analysis"
+    )
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="Launch VLC and step through detected anomalies"
     )
 
     args = parser.parse_args()
@@ -304,6 +467,10 @@ def main():
         # Step 6: Report
         duration_sec = timestamps[-1] if timestamps else 0
         print_report(groups, len(events), len(brightness), duration_sec, args.fps)
+
+        # Step 7: Interactive review (if requested)
+        if args.review:
+            review_anomalies(video_path, groups)
 
     finally:
         # Clean up temporary frames
