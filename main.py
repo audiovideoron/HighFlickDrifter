@@ -328,6 +328,9 @@ def main():
         duration_sec = timestamps[-1] if timestamps else 0
         print_report(groups, len(events), len(brightness), duration_sec, args.fps)
 
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user. Cleaning up temporary files...")
+        raise
     finally:
         # Clean up temporary frames
         if not args.keep_frames and frame_dir.exists():
