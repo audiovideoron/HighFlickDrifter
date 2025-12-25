@@ -46,16 +46,16 @@ def extract_frame_timestamps(video_path: Path, fps: int) -> list[float]:
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=True)
-    except subprocess.TimeoutExpired:
-        print("Error: ffmpeg timestamp extraction timed out after 300 seconds")
-        print("This may indicate a very large video file or ffmpeg hang")
-        sys.exit(1)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            "ffmpeg timestamp extraction timed out after 300 seconds. "
+            "This may indicate a very large video file or ffmpeg hang"
+        ) from e
     except subprocess.CalledProcessError as e:
-        print("Error: ffmpeg timestamp extraction failed")
-        print(f"ffmpeg returned non-zero exit code: {e.returncode}")
+        error_msg = f"ffmpeg timestamp extraction failed with exit code {e.returncode}"
         if e.stderr:
-            print(f"Error output: {e.stderr}")
-        sys.exit(1)
+            error_msg += f"\nError output: {e.stderr}"
+        raise RuntimeError(error_msg) from e
 
     lines = result.stderr.splitlines()
 
@@ -100,10 +100,11 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int) -> int:
             f.rename(output_dir / f.name)
 
         return len(list(output_dir.glob("frame_*.jpg")))
-    except subprocess.TimeoutExpired:
-        print("Error: ffmpeg frame extraction timed out after 600 seconds")
-        print("This may indicate a very large video file or ffmpeg hang")
-        sys.exit(1)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            "ffmpeg frame extraction timed out after 600 seconds. "
+            "This may indicate a very large video file or ffmpeg hang"
+        ) from e
     finally:
         # Clean up temp directory
         if temp_dir.exists():
@@ -371,12 +372,12 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
         # Check if VLC process is still alive
         if vlc_process.poll() is not None:
             # Process has died
-            print("Error: VLC process terminated unexpectedly.")
-            print("This usually means:")
-            print("  - VLC failed to start (check if VLC is properly installed)")
-            print("  - The video file format is not supported")
-            print("  - VLC encountered a startup error")
-            return
+            raise RuntimeError(
+                "VLC process terminated unexpectedly. This usually means:\n"
+                "  - VLC failed to start (check if VLC is properly installed)\n"
+                "  - The video file format is not supported\n"
+                "  - VLC encountered a startup error"
+            )
 
         # Check if HTTP interface is ready
         if vlc_is_ready():
@@ -385,14 +386,15 @@ def review_anomalies(video_path: Path, groups: list[list[dict]]):
     else:
         # Timeout reached
         elapsed_time = max_retries * retry_interval
-        print(f"Error: VLC HTTP interface not responding after {elapsed_time:.1f} seconds.")
-        print("VLC process is still running but the HTTP interface is not available.")
-        print("This may indicate:")
-        print("  - VLC is starting very slowly")
-        print("  - HTTP interface is disabled in VLC preferences")
-        print(f"  - Port {VLC_HTTP_PORT} is already in use")
         vlc_process.terminate()
-        return
+        raise RuntimeError(
+            f"VLC HTTP interface not responding after {elapsed_time:.1f} seconds. "
+            "VLC process is still running but the HTTP interface is not available. "
+            "This may indicate:\n"
+            "  - VLC is starting very slowly\n"
+            "  - HTTP interface is disabled in VLC preferences\n"
+            f"  - Port {VLC_HTTP_PORT} is already in use"
+        )
 
     print(f"Reviewing {len(groups)} anomaly segments. Press Enter to play through each.\n")
 
@@ -543,7 +545,10 @@ def main():
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user. Cleaning up temporary files...")
-        raise
+        sys.exit(130)  # Standard exit code for SIGINT
+    except (RuntimeError, FileNotFoundError) as e:
+        print(f"\nError: {e}")
+        sys.exit(1)
     finally:
         # Clean up temporary frames
         if not args.keep_frames and frame_dir.exists():
